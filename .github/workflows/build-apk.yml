@@ -20,17 +20,16 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          accept-android-sdk-licenses: true
+          packages: ''
 
-      - name: Install Android SDK packages
+      - name: Install required Android packages
         run: |
-          sdkmanager --install \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
+          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
 
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
