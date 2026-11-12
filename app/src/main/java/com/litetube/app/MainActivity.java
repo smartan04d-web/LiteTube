@@ -30,12 +30,15 @@ public final class MainActivity extends Activity {
     private static final String HOME = "https://m.youtube.com/";
     private static final String PREFS = "litetube_settings";
     private static final String FILTER_KEY = "filter_enabled";
+    private static final String AUTO_SKIP_KEY = "auto_skip_enabled";
     private static final String[] BLOCKED_HOSTS = {
         "doubleclick.net", "googleadservices.com", "googlesyndication.com",
         "adservice.google.com", "adservice.google.co.in",
         "google-analytics.com", "googletagmanager.com"
     };
     private volatile boolean filterEnabled;
+    private boolean autoSkipEnabled;
+    private TextView skipButton;
     private WebView webView;
     private FrameLayout root;
     private LinearLayout toolbar;
@@ -49,31 +52,33 @@ public final class MainActivity extends Activity {
         @Override public void run() {
             if (!active || webView == null) return;
             String url = webView.getUrl();
-            if (filterEnabled && url != null && url.startsWith("https://m.youtube.com/")) {
+            if (autoSkipEnabled && url != null && url.startsWith("https://m.youtube.com/")) {
                 // Only click YouTube's already-enabled, visible Skip Ad button.
                 // Never seek in the video, hide an ad overlay, or bypass the countdown.
                 webView.evaluateJavascript(SKIP_SCRIPT, null);
             }
-            skipHandler.postDelayed(this, 1000);
+            skipHandler.postDelayed(this, 1500);
         }
     };
     private static final String SKIP_SCRIPT =
         "(function(){try{" +
+        "var ad=document.querySelector('.ad-showing,.ytp-ad-player-overlay,.ytp-ad-preview-container');" +
+        "if(!ad)return false;" +
         "var selectors=['.ytp-ad-skip-button','.ytp-ad-skip-button-modern'," +
-        "'.ytp-skip-ad-button','button[aria-label=\"Skip Ads\"]'," +
-        "'button[aria-label=\"Skip Ad\"]'];" +
-        "for(var i=0;i<selectors.length;i++){" +
-        "var nodes=document.querySelectorAll(selectors[i]);" +
-        "for(var j=0;j<nodes.length;j++){var b=nodes[j];" +
-        "var r=b.getBoundingClientRect();var st=getComputedStyle(b);" +
-        "if(r.width>0&&r.height>0&&st.visibility!=='hidden'&&" +
-        "st.display!=='none'&&!b.disabled&&b.getAttribute('aria-disabled')!=='true'){" +
-        "b.click();return true;}}}return false;" +
+        "'.ytp-skip-ad-button','.ytp-ad-skip-button-container button'," +
+        "'button[aria-label=\\\"Skip Ad\\\"]','button[aria-label=\\\"Skip Ads\\\"]'];" +
+        "var nodes=document.querySelectorAll(selectors.join(','));" +
+        "for(var i=0;i<nodes.length;i++){var b=nodes[i];" +
+        "var r=b.getBoundingClientRect(),st=getComputedStyle(b);" +
+        "if(!b.disabled&&b.getAttribute('aria-disabled')!=='true'&&" +
+        "r.width>0&&r.height>0&&st.visibility!=='hidden'&&st.display!=='none'){" +
+        "b.click();return true;}}return false;" +
         "}catch(e){return false;}})();";
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         filterEnabled = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(FILTER_KEY, true);
+        autoSkipEnabled = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(AUTO_SKIP_KEY, true);
         getWindow().setStatusBarColor(Color.rgb(16, 16, 16));
         getWindow().setNavigationBarColor(Color.rgb(16, 16, 16));
 
@@ -102,6 +107,13 @@ public final class MainActivity extends Activity {
         });
         filterButton.setTextSize(12);
         updateFilterButton();
+        skipButton = addButton("", "Toggle automatic Skip Ad", () -> {
+            autoSkipEnabled = !autoSkipEnabled;
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(AUTO_SKIP_KEY, autoSkipEnabled).apply();
+            updateSkipButton();
+        });
+        skipButton.setTextSize(11);
+        updateSkipButton();
         content.addView(toolbar, new LinearLayout.LayoutParams(-1, dp(48)));
 
         webView = new WebView(this);
@@ -183,6 +195,11 @@ public final class MainActivity extends Activity {
         filterButton.setTextColor(filterEnabled ? Color.rgb(110, 220, 145) : Color.LTGRAY);
         filterButton.setContentDescription(filterEnabled ? "Ad filter enabled; tap to disable" : "Ad filter disabled; tap to enable");
     }
+    private void updateSkipButton() {
+        skipButton.setText(autoSkipEnabled ? "Skip\\nON" : "Skip\\nOFF");
+        skipButton.setTextColor(autoSkipEnabled ? Color.rgb(110, 220, 145) : Color.LTGRAY);
+        skipButton.setContentDescription(autoSkipEnabled ? "Auto Skip enabled; tap to disable" : "Auto Skip disabled; tap to enable");
+    }
     private void openExternal(Intent intent) {
         try { startActivity(intent); }
         catch (ActivityNotFoundException ignored) { }
@@ -227,7 +244,7 @@ public final class MainActivity extends Activity {
         if (webView != null) webView.onResume();
         active = true;
         skipHandler.removeCallbacks(skipCheck);
-        skipHandler.postDelayed(skipCheck, 1000);
+        skipHandler.postDelayed(skipCheck, 1500);
     }
     @Override protected void onSaveInstanceState(Bundle outState) {
         if (webView != null) webView.saveState(outState);
