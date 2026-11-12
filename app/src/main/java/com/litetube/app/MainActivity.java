@@ -3,34 +3,77 @@ package com.litetube.app;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import java.io.ByteArrayInputStream;
+import java.util.Locale;
 
 public final class MainActivity extends Activity {
     private static final String HOME = "https://m.youtube.com/";
+    private static final String PREFS = "litetube_settings";
+    private static final String FILTER_KEY = "filter_enabled";
+    private static final String[] BLOCKED_HOSTS = {
+        "doubleclick.net", "googleadservices.com", "googlesyndication.com",
+        "adservice.google.com", "adservice.google.co.in",
+        "google-analytics.com", "googletagmanager.com"
+    };
+    private volatile boolean filterEnabled;
     private WebView webView;
     private FrameLayout root;
     private LinearLayout toolbar;
+    private TextView filterButton;
     private View fullscreenView;
     private WebChromeClient.CustomViewCallback fullscreenCallback;
     private int previousOrientation;
+    private final Handler skipHandler = new Handler(Looper.getMainLooper());
+    private boolean active = false;
+    private final Runnable skipCheck = new Runnable() {
+        @Override public void run() {
+            if (!active || webView == null) return;
+            String url = webView.getUrl();
+            if (filterEnabled && url != null && url.startsWith("https://m.youtube.com/")) {
+                // Only click YouTube's already-enabled, visible Skip Ad button.
+                // Never seek in the video, hide an ad overlay, or bypass the countdown.
+                webView.evaluateJavascript(SKIP_SCRIPT, null);
+            }
+            skipHandler.postDelayed(this, 1000);
+        }
+    };
+    private static final String SKIP_SCRIPT =
+        "(function(){try{" +
+        "var selectors=['.ytp-ad-skip-button','.ytp-ad-skip-button-modern'," +
+        "'.ytp-skip-ad-button','button[aria-label=\"Skip Ads\"]'," +
+        "'button[aria-label=\"Skip Ad\"]'];" +
+        "for(var i=0;i<selectors.length;i++){" +
+        "var nodes=document.querySelectorAll(selectors[i]);" +
+        "for(var j=0;j<nodes.length;j++){var b=nodes[j];" +
+        "var r=b.getBoundingClientRect();var st=getComputedStyle(b);" +
+        "if(r.width>0&&r.height>0&&st.visibility!=='hidden'&&" +
+        "st.display!=='none'&&!b.disabled&&b.getAttribute('aria-disabled')!=='true'){" +
+        "b.click();return true;}}}return false;" +
+        "}catch(e){return false;}})();";
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        filterEnabled = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(FILTER_KEY, true);
         getWindow().setStatusBarColor(Color.rgb(16, 16, 16));
         getWindow().setNavigationBarColor(Color.rgb(16, 16, 16));
 
@@ -41,24 +84,32 @@ public final class MainActivity extends Activity {
         toolbar = new LinearLayout(this);
         toolbar.setGravity(Gravity.CENTER_VERTICAL);
         toolbar.setBackgroundColor(Color.rgb(24, 24, 24));
-        addButton("⌂", () -> webView.loadUrl(HOME));
-        addButton("‹", () -> { if (webView.canGoBack()) webView.goBack(); });
-        addButton("↻", () -> webView.reload());
+        addButton("⌂", "Home", () -> webView.loadUrl(HOME));
+        addButton("‹", "Back", () -> { if (webView.canGoBack()) webView.goBack(); });
+        addButton("↻", "Reload", () -> webView.reload());
         TextView title = new TextView(this);
         title.setText("LiteTube");
         title.setTextColor(Color.WHITE);
         title.setTextSize(17);
         title.setGravity(Gravity.CENTER_VERTICAL);
-        title.setPadding(14, 0, 0, 0);
+        title.setPadding(dp(8), 0, 0, 0);
         toolbar.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1));
+        filterButton = addButton("", "Toggle ad filter", () -> {
+            filterEnabled = !filterEnabled;
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(FILTER_KEY, filterEnabled).apply();
+            updateFilterButton();
+            webView.reload();
+        });
+        filterButton.setTextSize(12);
+        updateFilterButton();
         content.addView(toolbar, new LinearLayout.LayoutParams(-1, dp(48)));
 
         webView = new WebView(this);
         webView.setBackgroundColor(Color.BLACK);
         WebSettings s = webView.getSettings();
-        s.setJavaScriptEnabled(true); // YouTube needs JavaScript.
-        s.setDomStorageEnabled(true); // YouTube preferences and sign-in.
-        s.setMediaPlaybackRequiresUserGesture(true); // Prevent automatic playback.
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        s.setMediaPlaybackRequiresUserGesture(true);
         s.setSupportMultipleWindows(false);
         s.setJavaScriptCanOpenWindowsAutomatically(false);
         s.setAllowFileAccess(false);
@@ -69,6 +120,15 @@ public final class MainActivity extends Activity {
         s.setBuiltInZoomControls(false);
         s.setDisplayZoomControls(false);
         webView.setWebViewClient(new WebViewClient() {
+            @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                if (!filterEnabled || request.isForMainFrame()) return null;
+                Uri uri = request.getUrl();
+                if (uri == null || !"https".equalsIgnoreCase(uri.getScheme())) return null;
+                if (isBlockedHost(uri.getHost())) {
+                    return new WebResourceResponse("text/plain", "UTF-8", new ByteArrayInputStream(new byte[0]));
+                }
+                return null;
+            }
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 if (!request.isForMainFrame()) return false;
                 Uri uri = request.getUrl();
@@ -79,7 +139,6 @@ public final class MainActivity extends Activity {
                     openExternal(new Intent(Intent.ACTION_VIEW, uri));
                     return true;
                 }
-                // Do not auto-launch custom URI schemes from untrusted web content.
                 return true;
             }
         });
@@ -104,32 +163,42 @@ public final class MainActivity extends Activity {
         else webView.loadUrl(HOME);
     }
 
+    private static boolean isBlockedHost(String host) {
+        if (host == null) return false;
+        String h = host.toLowerCase(Locale.ROOT);
+        for (String domain : BLOCKED_HOSTS) {
+            if (h.equals(domain) || h.endsWith("." + domain)) return true;
+        }
+        return false;
+    }
     private static boolean isYouTubeHost(String host) {
         if (host == null) return false;
-        String h = host.toLowerCase(java.util.Locale.ROOT);
+        String h = host.toLowerCase(Locale.ROOT);
         return h.equals("youtube.com") || h.endsWith(".youtube.com")
                 || h.equals("youtu.be") || h.equals("youtube-nocookie.com")
                 || h.endsWith(".youtube-nocookie.com");
     }
-
+    private void updateFilterButton() {
+        filterButton.setText(filterEnabled ? "Ads\nON" : "Ads\nOFF");
+        filterButton.setTextColor(filterEnabled ? Color.rgb(110, 220, 145) : Color.LTGRAY);
+        filterButton.setContentDescription(filterEnabled ? "Ad filter enabled; tap to disable" : "Ad filter disabled; tap to enable");
+    }
     private void openExternal(Intent intent) {
         try { startActivity(intent); }
         catch (ActivityNotFoundException ignored) { }
     }
-
-    private void addButton(String symbol, Runnable action) {
+    private TextView addButton(String symbol, String description, Runnable action) {
         TextView button = new TextView(this);
         button.setText(symbol);
         button.setTextSize(26);
         button.setTextColor(Color.WHITE);
         button.setGravity(Gravity.CENTER);
-        button.setContentDescription(symbol.equals("⌂") ? "Home" : symbol.equals("‹") ? "Back" : "Reload");
+        button.setContentDescription(description);
         button.setOnClickListener(v -> action.run());
         toolbar.addView(button, new LinearLayout.LayoutParams(dp(52), dp(48)));
+        return button;
     }
-
     private int dp(int size) { return Math.round(size * getResources().getDisplayMetrics().density); }
-
     private void exitFullscreen() {
         if (fullscreenView == null) return;
         root.removeView(fullscreenView);
@@ -142,29 +211,31 @@ public final class MainActivity extends Activity {
         fullscreenCallback = null;
         if (callback != null) callback.onCustomViewHidden();
     }
-
     @Override public void onBackPressed() {
         if (fullscreenView != null) exitFullscreen();
         else if (webView != null && webView.canGoBack()) webView.goBack();
         else super.onBackPressed();
     }
-
     @Override protected void onPause() {
+        active = false;
+        skipHandler.removeCallbacks(skipCheck);
         if (webView != null) webView.onPause();
         super.onPause();
     }
-
     @Override protected void onResume() {
         super.onResume();
         if (webView != null) webView.onResume();
+        active = true;
+        skipHandler.removeCallbacks(skipCheck);
+        skipHandler.postDelayed(skipCheck, 1000);
     }
-
     @Override protected void onSaveInstanceState(Bundle outState) {
         if (webView != null) webView.saveState(outState);
         super.onSaveInstanceState(outState);
     }
-
     @Override protected void onDestroy() {
+        active = false;
+        skipHandler.removeCallbacks(skipCheck);
         if (fullscreenView != null) exitFullscreen();
         if (webView != null) {
             ViewGroup parent = (ViewGroup) webView.getParent();
