@@ -8,11 +8,25 @@ android {
         applicationId 'com.litetube.app'
         minSdk 29
         targetSdk 35
-        versionCode 3
-        versionName '3.0.0'
+        versionCode 4
+        versionName '3.1.0'
+    }
+    signingConfigs {
+        release {
+            def storeFilePath = System.getenv('LITETUBE_KEYSTORE_FILE')
+            if (storeFilePath) {
+                storeFile file(storeFilePath)
+                storePassword System.getenv('LITETUBE_STORE_PASSWORD')
+                keyAlias System.getenv('LITETUBE_KEY_ALIAS')
+                keyPassword System.getenv('LITETUBE_KEY_PASSWORD')
+            }
+        }
     }
     buildTypes {
         release {
+            if (System.getenv('LITETUBE_KEYSTORE_FILE')) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'

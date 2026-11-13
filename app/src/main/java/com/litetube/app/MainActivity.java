@@ -1,8 +1,6 @@
 package com.litetube.app;
 
 import android.app.Activity;
-import android.content.ActivityNotFoundException;
-import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.graphics.Color;
@@ -121,8 +119,8 @@ public final class MainActivity extends Activity {
         WebSettings s = webView.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
-        s.setMediaPlaybackRequiresUserGesture(true);
         s.setSupportMultipleWindows(false);
+        s.setMediaPlaybackRequiresUserGesture(false);
         s.setJavaScriptCanOpenWindowsAutomatically(false);
         s.setAllowFileAccess(false);
         s.setAllowContentAccess(false);
@@ -146,11 +144,28 @@ public final class MainActivity extends Activity {
                 Uri uri = request.getUrl();
                 String scheme = uri.getScheme();
                 String host = uri.getHost();
-                if ("https".equalsIgnoreCase(scheme) && isYouTubeHost(host)) return false;
+                // Keep ordinary web navigation inside this WebView.
                 if ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)) {
-                    openExternal(new Intent(Intent.ACTION_VIEW, uri));
+                    return false;
+                }
+                // YouTube sometimes emits intent:// links for its native app.
+                // Use a safe web fallback inside LiteTube instead of launching another app.
+                if ("intent".equalsIgnoreCase(scheme)) {
+                    try {
+                        android.content.Intent intent = android.content.Intent.parseUri(
+                                uri.toString(), android.content.Intent.URI_INTENT_SCHEME);
+                        String fallback = intent.getStringExtra("browser_fallback_url");
+                        if (fallback != null) {
+                            Uri fallbackUri = Uri.parse(fallback);
+                            if ("https".equalsIgnoreCase(fallbackUri.getScheme())
+                                    && isYouTubeHost(fallbackUri.getHost())) {
+                                view.loadUrl(fallback);
+                            }
+                        }
+                    } catch (Exception ignored) { }
                     return true;
                 }
+                // Do not launch external applications for unsupported URI schemes.
                 return true;
             }
         });
@@ -199,10 +214,6 @@ public final class MainActivity extends Activity {
         skipButton.setText(autoSkipEnabled ? "Skip\\nON" : "Skip\\nOFF");
         skipButton.setTextColor(autoSkipEnabled ? Color.rgb(110, 220, 145) : Color.LTGRAY);
         skipButton.setContentDescription(autoSkipEnabled ? "Auto Skip enabled; tap to disable" : "Auto Skip disabled; tap to enable");
-    }
-    private void openExternal(Intent intent) {
-        try { startActivity(intent); }
-        catch (ActivityNotFoundException ignored) { }
     }
     private TextView addButton(String symbol, String description, Runnable action) {
         TextView button = new TextView(this);

@@ -4,6 +4,8 @@
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
         android:label="LiteTube"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/Theme.LiteTube"
         android:supportsRtl="true">
         <activity
